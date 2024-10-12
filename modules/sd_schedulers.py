@@ -3,6 +3,7 @@ import torch
 import k_diffusion
 import numpy as np
 from scipy import stats
+import math
 
 from modules import shared
 
@@ -207,6 +208,36 @@ def ays_32_sigmas(n, sigma_min, sigma_max, device='cpu'):
         sigmas.append(0.0)
     return torch.FloatTensor(sigmas).to(device)
 
+def cosine_scheduler(n, sigma_min, sigma_max, inner_model, device):
+    sigs = []
+    doffset = 0.25  # Offset to avoid overshooting at the start
+    dmin = 1        # Minimum divisor to prevent overblowing
+    dmax = 1 + doffset  # Maximum divisor to control decay speed
+    dpct = 4        # Percentage of total steps for the decay phase
+
+    # Loop over the number of steps (n)
+    for x in range(n):
+        # Cosine interpolation over the steps
+        cos_val = (-0.5 * (1 + math.cos(math.pi * x / (n - 1)))) + 1
+        # Find index for the corresponding sigma
+        ind = int(cos_val * (len(inner_model.sigmas) - 1))
+
+        # Adjust the decay factor based on the step
+        div = dmin if x == 0 else dmax
+        if x != 0:
+            div -= doffset * ((x - 1) / (max((n // dpct), 1)))
+
+        # Get the sigma value and apply the divisor
+        sigma = inner_model.sigmas[-(1 + ind)].item() / max(min(div, dmax), dmin)
+        sigs.append(sigma)
+
+    # Add the final zero sigma to the list
+    sigs.append(0.0)
+
+    # Convert to torch.FloatTensor and move to the appropriate device
+    sigmas = torch.FloatTensor(sigs).to(device)
+    return sigmas
+
 
 schedulers = [
     Scheduler('automatic', 'Automatic', None),
@@ -225,6 +256,7 @@ schedulers = [
     Scheduler('align_your_steps_GITS', 'Align Your Steps GITS', get_align_your_steps_sigmas_GITS),
     Scheduler('align_your_steps_11', 'Align Your Steps 11', ays_11_sigmas),
     Scheduler('align_your_steps_32', 'Align Your Steps 32', ays_32_sigmas),
+    Scheduler('cosine', 'Cosine', cosine_scheduler, need_inner_model=True),
 ]
 
 schedulers_map = {**{x.name: x for x in schedulers}, **{x.label: x for x in schedulers}}

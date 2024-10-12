@@ -1,6 +1,8 @@
 import math
 import torch
 import numpy as np
+from modules.shared import opts
+
 
 
 def betas_for_alpha_bar(num_diffusion_timesteps, alpha_bar, max_beta=0.999):
@@ -48,6 +50,10 @@ def flux_time_shift(mu, sigma, t):
 class AbstractPrediction(torch.nn.Module):
     def __init__(self, sigma_data=1.0, prediction_type='epsilon'):
         super().__init__()
+        # Use the shared option if selected, otherwise keep the default
+        selected_prediction_type = opts.prediction_type
+        if selected_prediction_type != "Leave Unchanged":
+            prediction_type = selected_prediction_type
         self.sigma_data = sigma_data
         self.prediction_type = prediction_type
         assert self.prediction_type in ['epsilon', 'const', 'v_prediction', 'edm']
