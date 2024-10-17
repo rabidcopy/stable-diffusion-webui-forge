@@ -3,6 +3,24 @@ import torch
 import numpy as np
 from modules.shared import opts
 
+def rescale_zero_terminal_snr_sigmas(sigmas):
+    alphas_cumprod = 1 / ((sigmas * sigmas) + 1)
+    alphas_bar_sqrt = alphas_cumprod.sqrt()
+
+    # Store old values
+    alphas_bar_sqrt_0 = alphas_bar_sqrt[0].clone()
+    alphas_bar_sqrt_T = alphas_bar_sqrt[-1].clone()
+
+    # Shift so the last timestep is zero
+    alphas_bar_sqrt -= (alphas_bar_sqrt_T)
+
+    # Scale so the first timestep is back to the old value
+    alphas_bar_sqrt *= alphas_bar_sqrt_0 / (alphas_bar_sqrt_0 - alphas_bar_sqrt_T)
+
+    # Convert alphas_bar_sqrt to betas
+    alphas_bar = alphas_bar_sqrt ** 2  # Revert sqrt
+    alphas_bar[-1] = 4.8973451890853435e-08
+    return ((1 - alphas_bar) / alphas_bar) ** 0.5
 
 
 def betas_for_alpha_bar(num_diffusion_timesteps, alpha_bar, max_beta=0.999):
@@ -100,7 +118,9 @@ class AbstractPrediction(torch.nn.Module):
 class Prediction(AbstractPrediction):
     def __init__(self, sigma_data=1.0, prediction_type='eps', beta_schedule='linear', linear_start=0.00085,
                  linear_end=0.012, timesteps=1000):
+        zsnr_enabled = opts.zsnr  # Use the Z-SNR option from opts
         super().__init__(sigma_data=sigma_data, prediction_type=prediction_type)
+        self.zsnr = zsnr_enabled  # Set Z-SNR state
         self.register_schedule(given_betas=None, beta_schedule=beta_schedule, timesteps=timesteps,
                                linear_start=linear_start, linear_end=linear_end, cosine_s=8e-3)
 
@@ -114,6 +134,9 @@ class Prediction(AbstractPrediction):
         alphas = 1. - betas
         alphas_cumprod = torch.cumprod(alphas, dim=0)
         sigmas = ((1 - alphas_cumprod) / alphas_cumprod) ** 0.5
+
+        if self.zsnr:  # Apply Z-SNR rescaling if enabled
+            sigmas = rescale_zero_terminal_snr_sigmas(sigmas)
 
         self.register_buffer('alphas_cumprod', alphas_cumprod.float())
         self.register_buffer('sigmas', sigmas.float())
